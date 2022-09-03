@@ -19,8 +19,8 @@ contract TimeLock is Ownable {
 
     uint256 public ownerFee;
     uint256 public ownerAmountEth;
-    uint256 public ownerAmountToken;
     uint256 id;
+    mapping(address => uint256) public ownerAmountToken;
     mapping(address => mapping(uint256 => User)) public locks;
 
     event Locked(
@@ -33,46 +33,61 @@ contract TimeLock is Ownable {
         uint256 id
     );
 
+    event UnLocked(
+        address indexed sender,
+        uint256 ethAmount,
+        uint256 tokenAmount,
+        uint256 id
+    );
+
+    event Withdraw(
+        address indexed token,
+        uint256 amountEth,
+        uint256 amountToken
+    );
+
     constructor(uint256 _ownerFee) {
         ownerFee = _ownerFee;
     }
 
     function lock(
-        uint256 _tokenAmount,
-        address _token,
+        uint256[] memory _tokenAmount,
+        address[] memory _token,
         uint256 _lockTime
     ) external payable {
-        require(locks[msg.sender][id].status == Status.UNLOCK, "Already Lock once!");
 
-        if (_token != address(0)) {
-            require(IERC20(_token).balanceOf(msg.sender) >= _tokenAmount, "Not enough funds!");
-            require(IERC20(_token).allowance(msg.sender, address(this)) >= _tokenAmount, "Have no approve!");
-            IERC20(_token).transferFrom(
+        for(uint256 i = 0; i <= _token.length; i++) {
+            if (_token[i] != address(0x0000000000000000000000000000000000000000)) {
+                require(IERC20(_token[i]).balanceOf(msg.sender) >= _tokenAmount[i], "Not enough funds!");
+                require(IERC20(_token[i]).allowance(msg.sender, address(this)) >= _tokenAmount[i], "Have no approve!");
+                IERC20(_token[i]).transferFrom(
+                    msg.sender,
+                    address(this),
+                    _tokenAmount[i]
+                ); 
+            }
+            
+            locks[msg.sender][id] = User(
+                msg.value,
+                _tokenAmount[i],
+                _token[i],
+                block.timestamp,
+                block.timestamp + _lockTime,
+                Status.LOCK
+            );
+
+            emit Locked(
                 msg.sender,
-                address(this),
-                _tokenAmount
-            ); 
+                _token[i],
+                _tokenAmount[i],
+                msg.value,
+                _lockTime,
+                block.timestamp + _lockTime,
+                id
+            );
+            id++;
         }
-        
-        locks[msg.sender][id] = User(
-            msg.value,
-            _tokenAmount,
-            _token,
-            block.timestamp,
-            block.timestamp + _lockTime,
-            Status.LOCK
-        );
 
-        emit Locked(
-            msg.sender,
-            _token,
-            _tokenAmount,
-            msg.value,
-            _lockTime,
-            block.timestamp + _lockTime,
-            id
-        );
-        id++;
     }
 
 
@@ -85,9 +100,17 @@ contract TimeLock is Ownable {
             payable(msg.sender).transfer(locks[msg.sender][_id].amountEth - ownerAmountEth);
         }
         if (locks[msg.sender][_id].amountToken > 0) {
-            ownerAmountToken += locks[msg.sender][_id].amountToken * (100 - ownerFee) / 100;
-            IERC20(locks[msg.sender][_id].token).transfer(msg.sender, locks[msg.sender][_id].amountToken - ownerAmountToken);  
+            ownerAmountToken[locks[msg.sender][_id].token] += locks[msg.sender][_id].amountToken * (100 - ownerFee) / 100;
+            IERC20(locks[msg.sender][_id].token).transfer(msg.sender, locks[msg.sender][_id].amountToken - locks[msg.sender][_id].amountToken * (100 - ownerFee) / 100);  
         }
+
+        emit UnLocked(
+            msg.sender,
+            locks[msg.sender][_id].amountEth,
+            locks[msg.sender][_id].amountToken,
+            _id
+        );
+
         locks[msg.sender][_id] = User (
             0,
             0,
@@ -101,7 +124,7 @@ contract TimeLock is Ownable {
 
     function withdraw(uint256 amountEth, uint256 amountToken, address token) external onlyOwner{
         require(amountEth <= ownerAmountEth, "Not enough funds!");
-        require(amountToken <= ownerAmountToken, "Not enough funds!");
+        require(amountToken <= ownerAmountToken[token], "Not enough funds!");
         if (amountEth > 0 && amountToken == 0) {
             payable(owner()).transfer(amountEth);
             return;
@@ -112,11 +135,12 @@ contract TimeLock is Ownable {
 
         payable(owner()).transfer(amountEth);
         IERC20(token).transfer(owner(), amountToken);
+        
+        emit Withdraw(
+            token,
+            amountEth,
+            amountToken
+        );
     }
 
 }
-
-
-// user karana miqani lock ani miangamic
-//usery karana miqani token lock ani
-//erkusnel miasin 
